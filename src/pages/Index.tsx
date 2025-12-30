@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Sword, User, Map, TreeDeciduous, 
   Menu, X, Sparkles, Flame, Target, Clock,
-  ChevronRight, Plus
+  ChevronRight, Plus, Bell
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,7 @@ import { CampaignMap } from '@/components/campaign/CampaignMap';
 import { XPBar } from '@/components/shared/XPBar';
 import { LevelUpAnimation } from '@/components/shared/XPAnimation';
 import { CreateRoleForm, CreateQuestForm, CreateObjectiveForm } from '@/components/forms';
+import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import { 
   getDashboardData, 
   getSkillsByRole, 
@@ -25,9 +26,19 @@ import {
   createRole,
   createQuest,
 } from '@/services/api';
+import {
+  showQuestCompleted,
+  showLevelUpNotification,
+  showDailySummary,
+  showStreakWarning,
+  showMotivationalMessage,
+  checkPendingReminders,
+  addNotification,
+} from '@/services/notificationService';
 import { DashboardData, IRole, ISkill, IObjective, IInvestment } from '@/types';
 import { RoleFormData, QuestFormData, ObjectiveFormData } from '@/lib/validations';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type View = 'dashboard' | 'roles' | 'campaign' | 'skills';
 
@@ -61,6 +72,22 @@ const Index = () => {
         ]);
         setObjectives(objs);
         setInvestments(invs);
+
+        // Welcome notification
+        addNotification(
+          'daily_summary',
+          '¡Bienvenido de vuelta!',
+          `Tienes ${dashboardData.todayQuests.filter(q => !q.is_completed).length} misiones pendientes`,
+        );
+
+        // Check for streak warning
+        const completedToday = dashboardData.todayQuests.filter(q => q.is_completed).length;
+        if (completedToday === 0 && dashboardData.stats.current_streak > 5) {
+          setTimeout(() => {
+            showStreakWarning(dashboardData.stats.current_streak);
+          }, 2000);
+        }
+
       } catch (error) {
         console.error('Error loading data:', error);
       } finally {
@@ -70,6 +97,27 @@ const Index = () => {
 
     loadData();
   }, []);
+
+  // Periodic reminder check (every minute)
+  useEffect(() => {
+    if (!data) return;
+
+    const checkReminders = () => {
+      checkPendingReminders(
+        data.todayQuests,
+        objectives,
+        data.stats.current_streak
+      );
+    };
+
+    // Initial check
+    checkReminders();
+
+    // Check every minute
+    const interval = setInterval(checkReminders, 60000);
+
+    return () => clearInterval(interval);
+  }, [data, objectives]);
 
   // Load skills when role is selected
   useEffect(() => {
@@ -87,22 +135,47 @@ const Index = () => {
   }, [selectedRole]);
 
   const handleQuestComplete = useCallback(async (questId: string) => {
+    const quest = data?.todayQuests.find(q => q.id === questId);
+    if (!quest) return;
+
     const result = await completeQuest(questId);
+    
+    // Show completion notification
+    showQuestCompleted(quest.title, quest.xp_reward);
     
     if (result.leveledUp && data) {
       const role = data.roles.find(r => r.id === result.quest.role_id);
       if (role) {
         setShowLevelUp(role.level + 1);
+        showLevelUpNotification(role.name, role.level + 1);
       }
     }
 
     // Refresh data
     const dashboardData = await getDashboardData();
     setData(dashboardData);
+
+    // Check if all quests completed
+    const allCompleted = dashboardData.todayQuests.every(q => q.is_completed);
+    if (allCompleted && dashboardData.todayQuests.length > 0) {
+      const totalXP = dashboardData.todayQuests.reduce((sum, q) => sum + q.xp_reward, 0);
+      setTimeout(() => {
+        showDailySummary(
+          dashboardData.todayQuests.length,
+          dashboardData.todayQuests.length,
+          totalXP
+        );
+      }, 1500);
+    }
   }, [data]);
 
   const handleUnlockSkill = useCallback(async (skillId: string) => {
     await unlockSkill(skillId);
+    
+    toast.success('¡Habilidad desbloqueada!', {
+      description: 'Continúa desarrollando tus capacidades',
+      icon: '🔓',
+    });
     
     // Refresh skills
     if (selectedRole) {
@@ -125,6 +198,12 @@ const Index = () => {
       is_active: true,
     });
     
+    addNotification(
+      'achievement',
+      '🎭 Nueva clase creada',
+      `"${formData.name}" se ha unido a tu aventura`,
+    );
+    
     // Refresh data
     const dashboardData = await getDashboardData();
     setData(dashboardData);
@@ -140,13 +219,18 @@ const Index = () => {
       frequency: formData.frequency,
     });
     
+    addNotification(
+      'quest_reminder',
+      '⚔️ Nueva misión añadida',
+      `"${formData.title}" (+${formData.xp_reward} XP)`,
+    );
+    
     // Refresh data
     const dashboardData = await getDashboardData();
     setData(dashboardData);
   }, []);
 
   const handleCreateObjective = useCallback(async (formData: ObjectiveFormData) => {
-    // Simulated - would call createObjective service
     const newObjective: IObjective = {
       id: `obj-${Date.now()}`,
       user_id: 'user-001',
@@ -163,7 +247,18 @@ const Index = () => {
     };
     
     setObjectives(prev => [...prev, newObjective]);
+    
+    addNotification(
+      'objective_deadline',
+      '🎯 Nuevo objetivo trimestral',
+      `"${formData.title}" - ${formData.quarter} ${formData.year}`,
+    );
   }, []);
+
+  // Quick action: Test notifications
+  const handleTestNotifications = () => {
+    showMotivationalMessage();
+  };
 
   const navItems = [
     { id: 'dashboard', label: 'Cuartel General', icon: Sword },
@@ -269,9 +364,12 @@ const Index = () => {
               ))}
             </nav>
 
-            {/* User Stats */}
-            <div className="flex items-center gap-4">
-              <div className="hidden sm:block text-right">
+            {/* User Stats & Notifications */}
+            <div className="flex items-center gap-2">
+              {/* Notification Center */}
+              <NotificationCenter />
+              
+              <div className="hidden sm:block text-right ml-2">
                 <div className="font-orbitron text-sm font-bold text-foreground">
                   {data.user.username}
                 </div>
@@ -453,6 +551,15 @@ const Index = () => {
                       <Clock className="h-5 w-5 text-primary" />
                       Agenda del Día
                     </h3>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleTestNotifications}
+                      className="text-muted-foreground hover:text-primary"
+                      title="Mensaje motivacional"
+                    >
+                      <Sparkles className="h-4 w-4" />
+                    </Button>
                   </div>
                   <div className="cyber-card p-4">
                     <TimeBlockAgenda timeBlocks={data.timeBlocks} />
