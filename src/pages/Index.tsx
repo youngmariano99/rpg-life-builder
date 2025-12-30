@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Sword, User, Map, TreeDeciduous, 
   Menu, X, Sparkles, Flame, Target, Clock,
-  ChevronRight
+  ChevronRight, Plus
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,7 @@ import { SkillTree } from '@/components/skills/SkillTree';
 import { CampaignMap } from '@/components/campaign/CampaignMap';
 import { XPBar } from '@/components/shared/XPBar';
 import { LevelUpAnimation } from '@/components/shared/XPAnimation';
+import { CreateRoleForm, CreateQuestForm, CreateObjectiveForm } from '@/components/forms';
 import { 
   getDashboardData, 
   getSkillsByRole, 
@@ -21,8 +22,11 @@ import {
   getInvestments,
   completeQuest,
   unlockSkill,
+  createRole,
+  createQuest,
 } from '@/services/api';
 import { DashboardData, IRole, ISkill, IObjective, IInvestment } from '@/types';
+import { RoleFormData, QuestFormData, ObjectiveFormData } from '@/lib/validations';
 import { cn } from '@/lib/utils';
 
 type View = 'dashboard' | 'roles' | 'campaign' | 'skills';
@@ -38,6 +42,11 @@ const Index = () => {
   const [mainGoal, setMainGoal] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [showLevelUp, setShowLevelUp] = useState<number | null>(null);
+
+  // Form states
+  const [showRoleForm, setShowRoleForm] = useState(false);
+  const [showQuestForm, setShowQuestForm] = useState(false);
+  const [showObjectiveForm, setShowObjectiveForm] = useState(false);
 
   // Load initial data
   useEffect(() => {
@@ -102,6 +111,60 @@ const Index = () => {
     }
   }, [selectedRole]);
 
+  // Form handlers
+  const handleCreateRole = useCallback(async (formData: RoleFormData) => {
+    await createRole({
+      user_id: 'user-001',
+      name: formData.name,
+      description: formData.description,
+      icon: formData.icon,
+      color: formData.color,
+      level: 1,
+      current_xp: 0,
+      xp_to_next_level: 150,
+      is_active: true,
+    });
+    
+    // Refresh data
+    const dashboardData = await getDashboardData();
+    setData(dashboardData);
+  }, []);
+
+  const handleCreateQuest = useCallback(async (formData: QuestFormData) => {
+    await createQuest({
+      user_id: 'user-001',
+      role_id: formData.role_id,
+      title: formData.title,
+      description: formData.description,
+      xp_reward: formData.xp_reward,
+      frequency: formData.frequency,
+    });
+    
+    // Refresh data
+    const dashboardData = await getDashboardData();
+    setData(dashboardData);
+  }, []);
+
+  const handleCreateObjective = useCallback(async (formData: ObjectiveFormData) => {
+    // Simulated - would call createObjective service
+    const newObjective: IObjective = {
+      id: `obj-${Date.now()}`,
+      user_id: 'user-001',
+      role_id: formData.role_id,
+      title: formData.title,
+      description: formData.description,
+      quarter: formData.quarter,
+      year: formData.year,
+      status: 'pending',
+      xp_reward: formData.xp_reward,
+      deadline: formData.deadline.toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    
+    setObjectives(prev => [...prev, newObjective]);
+  }, []);
+
   const navItems = [
     { id: 'dashboard', label: 'Cuartel General', icon: Sword },
     { id: 'roles', label: 'Hoja de Personaje', icon: User },
@@ -141,6 +204,26 @@ const Index = () => {
           />
         )}
       </AnimatePresence>
+
+      {/* Forms */}
+      <CreateRoleForm
+        open={showRoleForm}
+        onOpenChange={setShowRoleForm}
+        onSubmit={handleCreateRole}
+        existingRolesCount={data.roles.length}
+      />
+      <CreateQuestForm
+        open={showQuestForm}
+        onOpenChange={setShowQuestForm}
+        onSubmit={handleCreateQuest}
+        roles={data.roles}
+      />
+      <CreateObjectiveForm
+        open={showObjectiveForm}
+        onOpenChange={setShowObjectiveForm}
+        onSubmit={handleCreateObjective}
+        roles={data.roles}
+      />
 
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-border/50 bg-background/80 backdrop-blur-md">
@@ -325,6 +408,15 @@ const Index = () => {
                       <Target className="h-5 w-5 text-primary" />
                       Misiones Diarias
                     </h3>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setShowQuestForm(true)}
+                      className="border-accent/50 text-accent hover:bg-accent/10"
+                    >
+                      <Plus className="h-4 w-4 mr-1" />
+                      Nueva
+                    </Button>
                   </div>
                   <div className="space-y-3">
                     {data.todayQuests.map((quest) => {
@@ -338,6 +430,19 @@ const Index = () => {
                         />
                       );
                     })}
+                    {data.todayQuests.length === 0 && (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Target className="h-12 w-12 mx-auto mb-2 opacity-30" />
+                        <p>No hay misiones para hoy</p>
+                        <Button
+                          variant="link"
+                          onClick={() => setShowQuestForm(true)}
+                          className="text-primary mt-2"
+                        >
+                          Crear tu primera misión
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </section>
 
@@ -416,6 +521,18 @@ const Index = () => {
                 />
               </div>
 
+              {/* Add Role Button */}
+              <div className="flex justify-center">
+                <Button
+                  onClick={() => setShowRoleForm(true)}
+                  disabled={data.roles.length >= 7}
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground font-orbitron"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nueva Clase ({data.roles.length}/7)
+                </Button>
+              </div>
+
               {/* Role Cards Grid */}
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {data.roles.map((role, index) => (
@@ -484,13 +601,22 @@ const Index = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
             >
-              <div className="text-center mb-8">
-                <h2 className="font-orbitron text-2xl md:text-3xl font-bold text-foreground mb-2">
-                  Mapa de Campaña
-                </h2>
-                <p className="text-muted-foreground">
-                  Planificación trimestral y objetivos
-                </p>
+              <div className="flex items-center justify-between mb-8">
+                <div className="text-center flex-1">
+                  <h2 className="font-orbitron text-2xl md:text-3xl font-bold text-foreground mb-2">
+                    Mapa de Campaña
+                  </h2>
+                  <p className="text-muted-foreground">
+                    Planificación trimestral y objetivos
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setShowObjectiveForm(true)}
+                  className="bg-secondary hover:bg-secondary/90 text-secondary-foreground font-orbitron"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nuevo Objetivo
+                </Button>
               </div>
 
               <CampaignMap
