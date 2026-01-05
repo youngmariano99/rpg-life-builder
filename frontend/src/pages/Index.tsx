@@ -15,7 +15,7 @@ import { SkillTree } from '@/components/skills/SkillTree';
 import { CampaignMap } from '@/components/campaign/CampaignMap';
 import { XPBar } from '@/components/shared/XPBar';
 import { LevelUpAnimation } from '@/components/shared/XPAnimation';
-import { CreateRoleForm, CreateQuestForm, CreateObjectiveForm } from '@/components/forms';
+import { CreateRoleForm, CreateQuestForm, CreateObjectiveForm, CreateSkillForm } from '@/components/forms';
 import { NotificationCenter } from '@/components/notifications/NotificationCenter';
 import {
   getDashboardData,
@@ -27,6 +27,7 @@ import {
   createRole,
   createQuest,
   logout,
+  createSkill
 } from '@/services/api';
 import { userService } from '../services/api/userService'; // IMPORTADO
 import {
@@ -42,6 +43,7 @@ import { DashboardData, IRole, ISkill, IObjective, IInvestment } from '@/types';
 import { RoleFormData, QuestFormData, ObjectiveFormData } from '@/lib/validations';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { investmentService } from '@/services/api/investmentService';
 
 type View = 'dashboard' | 'roles' | 'campaign' | 'skills';
 
@@ -61,6 +63,7 @@ const Index = () => {
   const [showRoleForm, setShowRoleForm] = useState(false);
   const [showQuestForm, setShowQuestForm] = useState(false);
   const [showObjectiveForm, setShowObjectiveForm] = useState(false);
+  const [showSkillForm, setShowSkillForm] = useState(false);
 
   // --- NUEVO: Obtener Stats Reales desde Backend ---
   const { data: stats } = useQuery({
@@ -79,7 +82,7 @@ const Index = () => {
 
         const [objs, invs] = await Promise.all([
           getObjectives(),
-          getInvestments(),
+          investmentService.getAll(),
         ]);
         setObjectives(objs);
         setInvestments(invs);
@@ -267,6 +270,21 @@ const Index = () => {
       `"${formData.title}" - ${formData.quarter} ${formData.year}`,
     );
   }, []);
+
+  const handleCreateSkill = useCallback(async (skillData: any) => {
+  if (!selectedRole) return;
+
+  await createSkill(skillData);
+
+  toast.success('¡Nueva habilidad aprendida!', {
+    description: `Has añadido "${skillData.name}" al árbol.`,
+    icon: '✨',
+  });
+
+  // Recargar la lista de skills para ver la nueva
+  const skills = await getSkillsByRole(selectedRole.id);
+  setRoleSkills(skills);
+}, [selectedRole]);
 
   // Quick action: Test notifications
   const handleTestNotifications = () => {
@@ -698,34 +716,54 @@ const Index = () => {
               exit={{ opacity: 0, y: -20 }}
               className="space-y-6"
             >
-              {/* Back Button & Title */}
-              <div className="flex items-center gap-4">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedRole(null);
-                    setView('roles');
-                  }}
-                  className="border-primary/50"
-                >
-                  ← Volver
-                </Button>
-                <div>
-                  <h2 className="font-orbitron text-2xl font-bold text-foreground flex items-center gap-2">
-                    <TreeDeciduous className="h-6 w-6 text-primary" />
-                    Árbol de Habilidades
-                  </h2>
-                  <p className="text-muted-foreground">
-                    {selectedRole.name} - Nivel {selectedRole.level}
-                  </p>
+              {/* Header de Skills: Botón Volver y Botón Nueva Habilidad */}
+              <div className="flex items-center justify-between"> {/* Changed to justify-between */}
+                <div className="flex items-center gap-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedRole(null);
+                      setView('roles');
+                    }}
+                    className="border-primary/50"
+                  >
+                    ← Volver
+                  </Button>
+                  <div>
+                    <h2 className="font-orbitron text-2xl font-bold text-foreground flex items-center gap-2">
+                      <TreeDeciduous className="h-6 w-6 text-primary" />
+                      Árbol de Habilidades
+                    </h2>
+                    <p className="text-muted-foreground">
+                      {selectedRole.name} - Nivel {selectedRole.level}
+                    </p>
+                  </div>
                 </div>
+                
+                {/* BOTÓN NUEVA HABILIDAD */}
+                <Button 
+                  onClick={() => setShowSkillForm(true)}
+                  className="bg-accent hover:bg-accent/90 text-accent-foreground font-orbitron"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nueva Habilidad
+                </Button>
               </div>
 
               {/* Skill Tree */}
               <SkillTree
                 skills={roleSkills}
                 onUnlockSkill={handleUnlockSkill}
+              />
+
+              {/* FORMULARIO MODAL */}
+              <CreateSkillForm 
+                open={showSkillForm}
+                onOpenChange={setShowSkillForm}
+                onSubmit={handleCreateSkill}
+                roleId={selectedRole.id}
+                existingSkills={roleSkills}
               />
             </motion.div>
           )}
