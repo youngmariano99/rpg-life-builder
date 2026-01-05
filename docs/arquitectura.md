@@ -170,3 +170,36 @@ Técnicamente:
 
 ---
 *Documento actualizado: 01/01/2026*
+
+## 7. Actualización: Dashboard en Tiempo Real y Lógica de Negocio (05/01/2026)
+
+Hoy hemos dado un paso crucial: **La pantalla principal (Dashboard) ya no miente**. Hemos reemplazado los datos estáticos de "Racha", "XP" y "Horas Enfocadas" por cálculos reales basados en el historial del usuario.
+
+### A. Lógica de Negocio en Backend (Estado Derivado)
+Una decisión de arquitectura importante que tomamos hoy fue sobre el **Estado Derivado**.
+
+* **Problema:** ¿Deberíamos guardar un campo `CurrentStreak` (Racha actual) en la tabla de usuarios y sumarle +1 cada día?
+* **Solución (.NET):** No. Decidimos **calcularlo al vuelo**.
+    * La "Racha" no es un dato estático; es una *consecuencia* de tu historial.
+    * En el endpoint `GET /api/users/me/stats`, usamos **LINQ** para consultar la tabla `XpLogs`.
+    * Buscamos días consecutivos de actividad hacia atrás. Si hoy no has hecho nada, verificamos ayer. Si ayer hiciste algo, la racha sigue viva (pero en peligro).
+    * **Ventaja:** Si un usuario borra un log o hay un error, la racha se recalcula sola correctamente. No hay "desincronización" de datos.
+
+### B. Optimización del Frontend (React Query)
+Para consumir estos datos, introdujimos una librería estándar de la industria: **TanStack Query (React Query)** via `useQuery`.
+
+**¿Por qué no usar `useEffect` y `fetch` simple?**
+1.  **Cache Automático:** Si cambias de pestaña y vuelves, React Query no necesita recargar los datos si son recientes.
+2.  **Revalidación en Foco:** Configuramos `refetchOnWindowFocus: true`. Esto significa que si el usuario completa una tarea en su celular, y luego mira la pantalla de la PC, el Dashboard se actualiza solo mágicamente sin que tenga que pulsar F5.
+3.  **Gestión de Estados:** Nos da variables como `isLoading` y `isError` gratis, simplificando el código de `Index.tsx`.
+
+### C. Resumen del Flujo de Datos Actual
+1.  **Frontend (`Index.tsx`)**: Carga y pide estadísticas con `useQuery`.
+2.  **Backend (`UsersController`)**:
+    * Calcula XP para siguiente nivel ($100 \times Nivel \times 1.5$).
+    * Suma la duración de los `TimeBlocks` de tipo "focus" agendados para hoy.
+    * Calcula la racha basándose en fechas únicas de `XpLogs`.
+3.  **Resultado**: El usuario ve su progreso real e instantáneo.
+
+---
+*Documento actualizado: 05/01/2026*

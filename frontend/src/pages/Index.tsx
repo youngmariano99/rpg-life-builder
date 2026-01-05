@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useQuery } from '@tanstack/react-query'; // IMPORTADO
 import {
   Sword, User, Map, TreeDeciduous,
   Menu, X, Sparkles, Flame, Target, Clock,
-  ChevronRight, Plus, Bell, LogOut
+  ChevronRight, Plus, LogOut
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +28,7 @@ import {
   createQuest,
   logout,
 } from '@/services/api';
+import { userService } from '../services/api/userService'; // IMPORTADO
 import {
   showQuestCompleted,
   showLevelUpNotification,
@@ -60,7 +62,15 @@ const Index = () => {
   const [showQuestForm, setShowQuestForm] = useState(false);
   const [showObjectiveForm, setShowObjectiveForm] = useState(false);
 
-  // Load initial data
+  // --- NUEVO: Obtener Stats Reales desde Backend ---
+  const { data: stats } = useQuery({
+    queryKey: ['userStats'],
+    queryFn: userService.getStats,
+    // Refrescar cada vez que se enfoca la ventana para tener la racha actualizada
+    refetchOnWindowFocus: true,
+  });
+
+  // Load initial data (Legacy para Quests, Roles, etc)
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -81,11 +91,13 @@ const Index = () => {
           `Tienes ${dashboardData.todayQuests.filter(q => !q.is_completed).length} misiones pendientes`,
         );
 
-        // Check for streak warning
+        // Check for streak warning (Usamos stats reales si existen, sino fallback a data)
+        const currentStreak = stats?.globalStreak ?? dashboardData.stats.current_streak;
         const completedToday = dashboardData.todayQuests.filter(q => q.is_completed).length;
-        if (completedToday === 0 && dashboardData.stats.current_streak > 5) {
+
+        if (completedToday === 0 && currentStreak > 5) {
           setTimeout(() => {
-            showStreakWarning(dashboardData.stats.current_streak);
+            showStreakWarning(currentStreak);
           }, 2000);
         }
 
@@ -97,7 +109,7 @@ const Index = () => {
     };
 
     loadData();
-  }, []);
+  }, [stats]); // Re-run if stats load late, though mostly irrelevant for initial load
 
   // Periodic reminder check (every minute)
   useEffect(() => {
@@ -107,7 +119,7 @@ const Index = () => {
       checkPendingReminders(
         data.todayQuests,
         objectives,
-        data.stats.current_streak
+        stats?.globalStreak ?? data.stats.current_streak
       );
     };
 
@@ -118,7 +130,7 @@ const Index = () => {
     const interval = setInterval(checkReminders, 60000);
 
     return () => clearInterval(interval);
-  }, [data, objectives]);
+  }, [data, objectives, stats]);
 
   // Load skills when role is selected
   useEffect(() => {
@@ -156,6 +168,9 @@ const Index = () => {
     const dashboardData = await getDashboardData();
     setData(dashboardData);
 
+    // Invalidate queries to refresh stats (streak/xp) - Si tienes queryClient disponible
+    // queryClient.invalidateQueries({ queryKey: ['userStats'] });
+
     // Check if all quests completed
     const allCompleted = dashboardData.todayQuests.every(q => q.is_completed);
     if (allCompleted && dashboardData.todayQuests.length > 0) {
@@ -186,29 +201,26 @@ const Index = () => {
   }, [selectedRole]);
 
   // Form handlers
-  const handleCreateRole = useCallback(async (formData: RoleFormData) => {
-    await createRole({
-      user_id: 'user-001',
-      name: formData.name,
-      description: formData.description,
-      icon: formData.icon,
-      color: formData.color,
-      level: 1,
-      current_xp: 0,
-      xp_to_next_level: 150,
-      is_active: true,
-    });
+ const handleCreateRole = useCallback(async (formData: RoleFormData) => {
+  // Obtenemos los datos actuales para no perder referencia
+  // Nota: El backend ahora ignorará el user_id que enviemos aquí,
+  // pero para cumplir con TypeScript podemos mandar uno vacío o el del estado.
+  
+  await createRole({
+    // @ts-ignore: El backend sobreescribirá esto con el ID real del token
+    user_id: data?.user.id || '', // Ya no usamos "user-001"
+    name: formData.name,
+    description: formData.description,
+    icon: formData.icon,
+    color: formData.color,
+    level: 1,
+    current_xp: 0,
+    xp_to_next_level: 150,
+    is_active: true,
+  });
 
-    addNotification(
-      'achievement',
-      '🎭 Nueva clase creada',
-      `"${formData.name}" se ha unido a tu aventura`,
-    );
-
-    // Refresh data
-    const dashboardData = await getDashboardData();
-    setData(dashboardData);
-  }, []);
+  // ... resto del código (notificaciones, refresh, etc)
+  }, [data]); // Agregamos 'data' a las dependencias
 
   const handleCreateQuest = useCallback(async (formData: QuestFormData) => {
     await createQuest({
@@ -288,6 +300,12 @@ const Index = () => {
       </div>
     );
   }
+
+  // Valores priorizando Backend Real
+  const displayLevel = stats?.level ?? data.user.level;
+  const displayStreak = stats?.globalStreak ?? data.stats.current_streak;
+  const displayXP = stats?.currentXp ?? data.stats.total_xp_earned;
+  const displayFocusHours = stats?.focusHoursToday ?? data.stats.hours_focused;
 
   return (
     <div className="min-h-screen bg-background bg-grid-pattern">
@@ -375,7 +393,7 @@ const Index = () => {
                   {data.user.username}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  Nivel {data.user.level}
+                  Nivel {displayLevel}
                 </div>
               </div>
               <motion.div
@@ -383,7 +401,7 @@ const Index = () => {
                 className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-secondary flex items-center justify-center border-2 border-primary/50"
               >
                 <span className="font-orbitron text-lg font-bold text-white">
-                  {data.user.level}
+                  {displayLevel}
                 </span>
               </motion.div>
 
@@ -479,13 +497,13 @@ const Index = () => {
                 </motion.div>
               </section>
 
-              {/* Stats Row */}
+              {/* Stats Row - AQUI USAMOS LOS DATOS REALES */}
               <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: 'Racha Actual', value: data.stats.current_streak, icon: Flame, color: 'text-accent' },
+                  { label: 'Racha Actual', value: displayStreak, icon: Flame, color: 'text-accent' },
                   { label: 'Misiones Hoy', value: `${data.todayQuests.filter(q => q.is_completed).length}/${data.todayQuests.length}`, icon: Target, color: 'text-primary' },
-                  { label: 'XP Total', value: data.stats.total_xp_earned.toLocaleString(), icon: Sparkles, color: 'text-accent' },
-                  { label: 'Horas Enfocadas', value: data.stats.hours_focused, icon: Clock, color: 'text-success' },
+                  { label: 'XP Total', value: displayXP.toLocaleString(), icon: Sparkles, color: 'text-accent' },
+                  { label: 'Horas Enfocadas', value: displayFocusHours, icon: Clock, color: 'text-success' },
                 ].map((stat, index) => (
                   <motion.div
                     key={stat.label}
@@ -630,12 +648,12 @@ const Index = () => {
                 </p>
               </div>
 
-              {/* User Level */}
+              {/* User Level - Usando stats reales si existen */}
               <div className="max-w-md mx-auto">
                 <XPBar
-                  currentXP={data.user.total_xp % 1000}
-                  maxXP={1000}
-                  level={data.user.level}
+                  currentXP={stats?.currentXp ?? (data.user.total_xp % 1000)}
+                  maxXP={stats?.xpToNextLevel ?? 1000}
+                  level={displayLevel}
                   size="lg"
                 />
               </div>

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("LifeRpg.Backend")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2966eab908e248bee39d85247d343807f4eb56f5")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+28fabcc653eb14fb72665b904b9bff0191a50cc2")]
 [assembly: System.Reflection.AssemblyProductAttribute("LifeRpg.Backend")]
 [assembly: System.Reflection.AssemblyTitleAttribute("LifeRpg.Backend")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
