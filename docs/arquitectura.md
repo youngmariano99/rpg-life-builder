@@ -1,261 +1,172 @@
-# Life RPG Planner - Arquitectura del Sistema
+# Life RPG Planner - Arquitectura del Sistema y Guía de Aprendizaje
 
-## Visión General
+Este documento no solo describe la arquitectura técnica del sistema, sino que también sirve como guía didáctica para entender las decisiones de diseño y la evolución del proyecto desde un prototipo simulado hasta una aplicación full-stack real.
 
-Life RPG Planner es una aplicación web de planificación personal que fusiona metodologías de productividad con mecánicas de videojuegos RPG. Este documento describe la arquitectura frontend y la estrategia de integración con el backend.
+## 1. Visión General: De Prototipo a Realidad
 
-## Stack Tecnológico
+El proyecto comenzó como un prototipo Frontend (React) que usaba datos falsos (**Mocks**) para simular un backend. El objetivo final es un sistema distribuido robusto con persistencia de datos real.
 
-### Frontend (Actual)
-- **Framework**: React 18 + Vite
-- **Lenguaje**: TypeScript
-- **Estilos**: Tailwind CSS + Shadcn/UI
-- **Animaciones**: Framer Motion
-- **Visualización**: @xyflow/react (árboles de habilidades)
-- **Estado**: React Query (TanStack Query)
-- **Routing**: React Router DOM v6
-- **Iconos**: Lucide React
+### ¿Qué hemos logrado?
+Hemos migrado exitosamente el "núcleo" del RPG (Roles, Misiones, Habilidades, Objetivos) de una simulación en memoria a una base de datos PostgreSQL gestionada por una API .NET 9.
 
-### Backend (Futuro - .NET)
-- **Framework**: ASP.NET Core Web API
-- **ORM**: Entity Framework Core
-- **Base de Datos**: PostgreSQL
-- **Autenticación**: JWT + Identity
+---
 
-## Estructura del Proyecto
+## 2. Diferencias Clave: Mock vs. API Real
 
-```
-src/
-├── assets/              # Imágenes y recursos estáticos
-├── components/          # Componentes reutilizables
-│   ├── ui/             # Componentes Shadcn/UI
-│   ├── dashboard/      # Componentes del dashboard
-│   ├── roles/          # Componentes de roles/clases
-│   ├── quests/         # Componentes de misiones
-│   ├── skills/         # Componentes del árbol de habilidades
-│   └── shared/         # Componentes compartidos
-├── hooks/              # Custom hooks
-├── lib/                # Utilidades y helpers
-├── pages/              # Páginas/Vistas principales
-├── services/           # Capa de servicios
-│   └── api/            # Servicios de API (mock → real)
-├── types/              # Interfaces TypeScript
-└── App.tsx             # Componente raíz
+Para entender lo que se hizo, comparemos los dos enfoques:
 
-database/
-└── schema.sql          # Esquema PostgreSQL
+### A. Enfoque Anterior (Mocking)
+En este enfoque, el frontend "fingía" hablar con un servidor.
 
-docs/
-├── arquitectura.md     # Este documento
-├── diseño_bd.md        # Documentación de base de datos
-└── guia_usuario.md     # Guía de mecánicas RPG
-```
+*   **Datos**: Arrays estáticos en memoria (`mockData.ts`). Si refrescabas la página, los cambios se perdían o se reseteaban.
+*   **Latencia**: Usábamos `simulateDelay(300)` para imitar artificialmente el tiempo que tarda un servidor en responder.
+*   **Lógica**: Toda la lógica (ej: "si completo misión, subo XP") vivía en el **Frontend**. Esto es inseguro para un juego real, ya que el usuario podría modificar el código JS para darse nivel 1000.
 
-## Estrategia de Conexión Frontend-Backend
-
-### Fase 1: Datos Simulados (Actual)
-
-El frontend utiliza datos mock en `src/services/api/mockData.ts`. Todas las funciones de servicio son **asíncronas** y simulan latencia de red:
-
+**Ejemplo de código Mock (Antes):**
 ```typescript
-// Ejemplo: src/services/api/roleService.ts
-export async function getRoles(): Promise<IRole[]> {
-  await simulateDelay(300); // Simula latencia
-  return [...mockRoles];
+// frontend/src/services/api/questService.ts (Antiguo)
+export async function completeQuest(id) {
+    await simulateDelay(); // Espera falsa
+    const quest = mockQuests.find(q => q.id === id); // Buscar en array en memoria
+    quest.is_completed = true; // Modificar memoria local
+    return quest;
 }
 ```
 
-### Fase 2: Integración con API .NET
+### B. Enfoque Actual (Full Stack .NET)
+Ahora el frontend es un cliente "tonto" que solo muestra lo que el backend le dice.
 
-Para migrar a una API real, solo se necesita modificar el interior de cada función:
+*   **Datos**: Persistentes en PostgreSQL. Si reinicias la PC, tus datos siguen ahí.
+*   **Comunicación**: HTTP real usando `fetch`.
+*   **Lógica**: La lógica crítica (XP, niveles, validaciones) vive en el **Backend (.NET)**. El frontend solo dice "El usuario intentó completar la misión X", y el backend decide si es válido y calcula las consecuencias.
 
+**Ejemplo de código Real (Nuevo):**
 ```typescript
-// ANTES (Mock)
-export async function getRoles(): Promise<IRole[]> {
-  await simulateDelay(300);
-  return [...mockRoles];
-}
-
-// DESPUÉS (API Real)
-export async function getRoles(): Promise<IRole[]> {
-  const response = await fetch('/api/roles', {
-    headers: {
-      'Authorization': `Bearer ${getToken()}`,
-      'Content-Type': 'application/json'
-    }
-  });
-  if (!response.ok) throw new Error('Error al obtener roles');
-  return response.json();
+// frontend/src/services/api/questService.ts (Nuevo)
+export async function completeQuest(id) {
+    // Llamada HTTP real al servidor
+    return api.post(`/api/quests/${id}/complete`, {});
 }
 ```
 
-### Configuración de API Base
+---
 
-Crear archivo `src/services/api/config.ts`:
+## 3. Arquitectura del Backend (.NET 9)
 
-```typescript
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://api.liferpg.com';
+Hemos construido una **API RESTful**. Imagina el backend como un camarero en un restaurante:
+1.  **El Menú (Endpoints)**: Define qué puedes pedir (`GET /quests`, `POST /roles`, `PUT /skills`).
+2.  **La Cocina (Services/Controllers)**: Donde se prepara lo que pediste.
+3.  **La Despensa (Database)**: Donde se guardan los ingredientes (datos).
 
-export async function apiClient<T>(
-  endpoint: string,
-  options?: RequestInit
-): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${localStorage.getItem('token')}`,
-      ...options?.headers,
-    },
-  });
+### Componentes Clave
 
-  if (!response.ok) {
-    throw new Error(`API Error: ${response.status}`);
-  }
+1.  **Models (`/Models`)**: Son los planos de nuestros datos. Definen cómo es un `User`, una `Quest` o una `Skill`.
+    *   *Nota*: Usamos `[Column("name")]` para traducir los nombres de C# (`PascalCase`) a PostgreSQL (`snake_case`).
 
-  return response.json();
-}
-```
+2.  **DbContext (`ApplicationDbContext`)**: Es el puente entre el código C# y la base de datos SQL. Hereda de Entity Framework Core.
 
-## Controladores .NET Requeridos
+3.  **Controllers (`/Controllers`)**: Son los encargados de recibir las peticiones del frontend.
+    *   `RolesController`
+    *   `QuestsController`
+    *   `SkillsController`
+    *   `ObjectivesController`
+    *   `TimeBlocksController`
 
-### RolesController
-```
-GET    /api/roles           → Obtener todos los roles del usuario
-GET    /api/roles/{id}      → Obtener rol por ID
-POST   /api/roles           → Crear nuevo rol
-PUT    /api/roles/{id}      → Actualizar rol
-DELETE /api/roles/{id}      → Eliminar rol
-POST   /api/roles/{id}/xp   → Agregar XP a un rol
-```
+4.  **Services (`/Services`)**: Lógica de negocio pura.
+    *   `XpService`: Contiene la matemática para calcular niveles. Si mañana cambiamos la fórmula de nivel, solo tocamos este archivo, no los controladores ni la BD.
 
-### QuestsController
-```
-GET    /api/quests           → Obtener todas las misiones
-GET    /api/quests/today     → Obtener misiones del día
-GET    /api/quests/{id}      → Obtener misión por ID
-POST   /api/quests           → Crear nueva misión
-PUT    /api/quests/{id}      → Actualizar misión
-DELETE /api/quests/{id}      → Eliminar misión
-POST   /api/quests/{id}/complete   → Completar misión
-POST   /api/quests/reset-daily     → Reiniciar misiones diarias
-```
+### Flujo de una Petición (Ejemplo: Completar Misión)
 
-### SkillsController
-```
-GET    /api/skills              → Obtener todas las habilidades
-GET    /api/skills?roleId={id}  → Obtener habilidades por rol
-GET    /api/skills/{id}         → Obtener habilidad por ID
-POST   /api/skills              → Crear nueva habilidad
-PUT    /api/skills/{id}         → Actualizar habilidad
-DELETE /api/skills/{id}         → Eliminar habilidad
-POST   /api/skills/{id}/unlock  → Desbloquear habilidad
-```
+1.  **Frontend**: Envía `POST /api/quests/123/complete`.
+2.  **Controller (`QuestsController`)**: Recibe la petición.
+    *   Verifica: "¿Esta misión existe?", "¿Ya está completada?".
+3.  **Lógica**:
+    *   Marca la misión como completada.
+    *   Llama a `XpService` para sumar XP al Rol asociado.
+    *   Verifica si el Rol subió de nivel.
+4.  **Base de Datos**: Guarda todos los cambios en una transacción (Misión actualizada + Rol actualizado + Logs).
+5.  **Respuesta**: Devuelve al frontend: `{ success: true, newXp: 500, leveledUp: false }`.
 
-### ObjectivesController
-```
-GET    /api/objectives                      → Obtener todos los objetivos
-GET    /api/objectives?quarter={q}&year={y} → Filtrar por trimestre
-POST   /api/objectives                      → Crear objetivo
-PUT    /api/objectives/{id}                 → Actualizar objetivo
-DELETE /api/objectives/{id}                 → Eliminar objetivo
-POST   /api/objectives/{id}/complete        → Completar objetivo
-```
+---
 
-## Flujo de Datos
+## 4. Integración Técnica
 
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Componente    │────▶│    Servicio      │────▶│   API (.NET)    │
-│   React         │     │   TypeScript     │     │   Controller    │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-        │                       │                        │
-        ▼                       ▼                        ▼
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Estado UI     │◀────│   React Query    │◀────│   PostgreSQL    │
-│   (Local)       │     │   (Cache)        │     │   Database      │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-```
+### Proxy Inverso (Vite)
+Para facilitar el desarrollo, configuramos un **Proxy** en `vite.config.ts`.
+*   El frontend corre en `localhost:8080`.
+*   El backend corre en `localhost:5184`.
+*   Cuando el frontend pide `/api/roles`, Vite intercepta esa llamada y la redirige "silenciosamente" a `localhost:5184/api/roles`.
+*   **Beneficio**: Evitamos problemas de seguridad del navegador (CORS) durante el desarrollo y simplificamos las URLs.
 
-## Manejo de Estado
+### Cliente API Centralizado
+Creamos `frontend/src/lib/api-client.ts`. Es una herramienta propia que envuelve `fetch` estándar.
+*   Añade automáticamente la URL base.
+*   Añade headers `Content-Type: application/json`.
+*    (Futuro) Añadirá automáticamente el Token de seguridad JWT.
 
-### React Query para Cache de Servidor
+---
 
-```typescript
-// hooks/useRoles.ts
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getRoles, addXPToRole } from '@/services/api';
+## 5. Próximos Pasos de Aprendizaje
 
-export function useRoles() {
-  return useQuery({
-    queryKey: ['roles'],
-    queryFn: getRoles,
-    staleTime: 5 * 60 * 1000, // 5 minutos
-  });
-}
+Ahora que tienes una arquitectura base sólida, los siguientes desafíos técnicos para aprender serían:
 
-export function useAddXP() {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ roleId, amount }: { roleId: string; amount: number }) =>
-      addXPToRole(roleId, amount),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['roles'] });
-    },
-  });
-}
-```
+1.  **Autenticación JWT**: Ahora mismo "fingimos" ser el primer usuario de la base de datos. El siguiente paso es implementar Login real para que el backend sepa *quién* está haciendo la petición.
+2.  **Validaciones Avanzadas**: Usar `FluentValidation` en el backend para asegurar que los datos enviados sean correctos antes de procesarlos.
+3.  **WebSockets (SignalR)**: Para notificaciones en tiempo real (ej: "¡Subiste de nivel!" sin recargar la página).
 
-## Autenticación (Implementación Futura)
+---
 
-1. **Login**: POST /api/auth/login → Retorna JWT
-2. **Registro**: POST /api/auth/register
-3. **Refresh Token**: POST /api/auth/refresh
-4. **Logout**: POST /api/auth/logout
 
-### Almacenamiento de Token
-```typescript
-// Guardar token
-localStorage.setItem('token', jwt);
+## 6. Actualización: Sistema de Autenticación y Seguridad (01/01/2026)
 
-// Incluir en headers
-fetch('/api/roles', {
-  headers: { 'Authorization': `Bearer ${token}` }
-});
-```
+Hoy hemos transformado el aplicativo de "Monousuario Inseguro" a un sistema **Multiusuario Seguro** utilizando estándares modernos de la industria.
 
-## Consideraciones de Seguridad
+### A. ¿En qué consiste el sistema de Login? (JWT)
 
-1. **CORS**: Configurar en .NET para permitir el dominio del frontend
-2. **Rate Limiting**: Implementar en API para prevenir abuso
-3. **Validación**: Validar todos los inputs en frontend y backend
-4. **Sanitización**: Escapar contenido generado por usuarios
+Hemos implementado **JSON Web Tokens (JWT)**. Piensa en el JWT como una pulsera de hotel "All-Inclusive".
+1.  **Check-in (Login)**: Vas a recepción (Endpoint `/api/auth/login`) con tu DNI (Usuario/Contraseña).
+2.  **La Pulsera (Token)**: Si tus datos son correctos, el recepcionista te da una pulsera firmada y sellada (el Token JWT).
+3.  **Acceso (Authorization)**: Para entrar a la piscina o comer (Endpoint `/api/roles`), solo muestras la pulsera. No tienes que volver a dar tu DNI cada vez.
 
-## Variables de Entorno
+Técnicamente:
+*   El Token es una cadena larga cifrada `eyJh...`.
+*   Contiene **Claims** (Datos): ID del usuario, Email, Expiración.
+*   El Backend lo firma con una **Secret Key** que solo él conoce. Si alguien intenta falsificar la pulsera, el Backend sabrá que la firma no coincide.
 
-```env
-# .env.local (Frontend)
-VITE_API_URL=https://api.liferpg.com
-VITE_APP_NAME=Life RPG Planner
+### B. Componentes Backend (.NET)
 
-# appsettings.json (.NET)
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Database=liferpg;Username=user;Password=pass"
-  },
-  "Jwt": {
-    "Key": "your-secret-key",
-    "Issuer": "liferpg",
-    "Audience": "liferpg-users"
-  }
-}
-```
+1.  **`AuthService`**:
+    *   **Registro**: Recibe la contraseña en texto plano, pero **NUNCA** la guarda así. Usa `BCrypt` para convertirla en un hash irreversible (`$2a$11$...`). Si hackean la base de datos, no sabrán tu contraseña real.
+    *   **Login**: Compara la contraseña que escribes con el hash guardado. Si coinciden, genera el JWT.
 
-## Próximos Pasos
+2.  **`[Authorize]`**: Es un "guardia de seguridad" que pusimos delante de los controladores (ej: `UsersController`). Si intentas entrar sin Token (o con uno falso), el guardia te detiene y devuelve error `401 Unauthorized`.
 
-1. Implementar API .NET Core con los controladores descritos
-2. Configurar Entity Framework Core con las entidades
-3. Implementar autenticación JWT
-4. Migrar servicios mock a llamadas fetch reales
-5. Configurar CI/CD para despliegue automático
+3.  **DbInitializer (Auto-Seeder)**:
+    *   Para facilitar las pruebas, creamos un script automático que se ejecuta al iniciar el backend. Si la base de datos está vacía, crea automáticamente el usuario `heroe@liferpg.com`.
+
+### C. Componentes Frontend (React)
+
+1.  **`authService.ts`**:
+    *   Se encarga de hablar con el backend para login/registro.
+    *   Guarda el Token recibido en el `localStorage` del navegador (como guardar la pulsera en tu bolsillo).
+
+2.  **`api-client.ts` (Interceptor Inteligente)**:
+    *   Antes de enviar *cualquier* petición al servidor, revisa si tienes el Token en el bolsillo.
+    *   Si lo tienes, lo pega automáticamente en la cabecera del mensaje (`Authorization: Bearer <token>`).
+    *   Si el servidor responde "401 (Tu pulsera caducó)", este componente te redirige automáticamente a la página de Login.
+
+3.  **`ProtectedRoute` (Componente Envoltorio)**:
+    *   Envuelve a las rutas privadas (Dashboard).
+    *   Si intentas ir directo a `/` sin haber iniciado sesión, te "rebota" a `/login`.
+
+### D. Flujo Completo Implementado
+
+1.  Usuario entra a la web -> `ProtectedRoute` detecta que no hay usuario -> Redirige a Login.
+2.  Usuario llena formulario -> Frontend llama a Backend (`/login`).
+3.  Backend valida Hash -> Genera Token -> Devuelve Token.
+4.  Frontend guarda Token -> Redirige a Dashboard.
+5.  Dashboard pide datos (`/api/users/me`) -> `api-client` adjunta Token.
+6.  Backend valida Token -> Extrae ID de usuario -> Devuelve datos reales del usuario.
+
+---
+*Documento actualizado: 01/01/2026*

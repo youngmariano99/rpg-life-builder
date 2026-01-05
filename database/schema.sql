@@ -1,7 +1,7 @@
 -- ==========================================
 -- LIFE RPG PLANNER - Esquema de Base de Datos
 -- Sintaxis: PostgreSQL
--- Versión: 1.0.0
+-- Versión: 1.0.1 (Fixes applied)
 -- ==========================================
 
 -- Extensiones necesarias
@@ -44,11 +44,7 @@ CREATE TABLE roles (
     xp_to_next_level INTEGER DEFAULT 100 CHECK (xp_to_next_level > 0),
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    
-    CONSTRAINT max_roles_per_user CHECK (
-        (SELECT COUNT(*) FROM roles r WHERE r.user_id = user_id) <= 7
-    )
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_roles_user_id ON roles(user_id);
@@ -186,14 +182,13 @@ CREATE TABLE campaigns (
     is_active BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     
-    CONSTRAINT valid_campaign_dates CHECK (end_date > start_date),
-    CONSTRAINT one_active_campaign UNIQUE (user_id, is_active) 
-        -- Solo puede haber una campaña activa por usuario
+    CONSTRAINT valid_campaign_dates CHECK (end_date > start_date)
 );
 
 CREATE INDEX idx_campaigns_user_id ON campaigns(user_id);
 CREATE INDEX idx_campaigns_quarter_year ON campaigns(quarter, year);
-CREATE INDEX idx_campaigns_is_active ON campaigns(is_active);
+-- Partial index for only ONE active campaign per user
+CREATE UNIQUE INDEX idx_campaigns_one_active ON campaigns(user_id) WHERE is_active = TRUE;
 
 -- ==========================================
 -- TABLA: investments
@@ -325,6 +320,27 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Función para validar máximo de roles (7 por usuario)
+CREATE OR REPLACE FUNCTION check_max_roles_on_insert()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM roles WHERE user_id = NEW.user_id;
+    
+    IF v_count >= 7 THEN
+        RAISE EXCEPTION 'El usuario ya ha alcanzado el límite de 7 clases/roles activos.';
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger de validación de máximo de roles
+CREATE TRIGGER trg_roles_max_limit
+    BEFORE INSERT ON roles
+    FOR EACH ROW EXECUTE FUNCTION check_max_roles_on_insert();
+
 -- ==========================================
 -- DATOS INICIALES (SEEDS)
 -- ==========================================
@@ -350,7 +366,7 @@ VALUES (
     12,
     45,
     3,
-    4250,
+    3,
     234
 );
 
